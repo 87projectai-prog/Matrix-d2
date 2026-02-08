@@ -4,7 +4,7 @@
 const char* ssid = "87PROJECT-MATRIXV2";
 const char* password = "87PROJECT.AI";
 
-// Semua pin relay yang tersedia
+// Semua pin relay yang tersedia (maks 8)
 const int allPins[8] = {D1,D2,D5,D6,D7,D8,D3,D4};
 int numRelays = 4; // default 4 relay aktif
 bool relayState[8] = {false,false,false,false,false,false,false,false};
@@ -13,27 +13,23 @@ ESP8266WebServer server(80);
 bool runningRelay = false;
 bool blitzMode = false;
 
-// Generate halaman web
+// ===== Generate halaman web =====
 String generateHTML() {
     String html = R"rawliteral(
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>87PROJECT Relay Control</title>
 <style>
-body { margin:0; padding:0; background:#0f0f0f; color:#00ffdd; font-family:'Arial',sans-serif; display:flex; flex-direction:column; align-items:center; min-height:100vh; }
-h1 { margin:20px; text-shadow:0 0 20px #00ffdd; }
-.relay-container { display:flex; gap:20px; flex-wrap:wrap; justify-content:center; margin-bottom:20px;}
-.relay { background:#111; padding:25px 35px; border-radius:15px; box-shadow:0 0 20px #00ffdd; text-align:center; transition:0.3s; }
-.relay:hover { transform:scale(1.05); }
-.relay button { padding:12px 28px; font-size:16px; border:none; border-radius:12px; cursor:pointer; transition:0.3s; color:#111; font-weight:bold; margin-top:10px; }
-.on { background:#00ffdd; } .off { background:#222; color:#00ffdd; }
-#runningBtn { background:#ff00ff; color:#111; margin-bottom:10px;}
-#blitzBtn { background:#ff0000; color:#fff; margin-bottom:20px;}
-footer { margin-top:auto; padding:10px; text-shadow:0 0 10px #00ffdd; }
-select { padding:8px; border-radius:8px; margin-bottom:20px; background:#111; color:#00ffdd; border:none;}
+body{background:#0f0f0f;color:#00ffdd;font-family:Arial,sans-serif;text-align:center;}
+button{padding:15px 30px;margin:10px;border-radius:10px;border:none;cursor:pointer;font-weight:bold;transition:0.3s;}
+.on{background:#00ffdd;color:#111;}
+.off{background:#222;color:#00ffdd;}
+#runningBtn{background:#ff00ff;color:#111;margin:10px;}
+#blitzBtn{background:#ff0000;color:#fff;margin:10px;}
+select{padding:8px;border-radius:8px;margin:20px;background:#111;color:#00ffdd;border:none;}
+footer{margin-top:20px;text-shadow:0 0 10px #00ffdd;}
 </style>
 </head>
 <body>
@@ -46,68 +42,61 @@ select { padding:8px; border-radius:8px; margin-bottom:20px; background:#111; co
   <option value="7")rawliteral" + String(numRelays==7?" selected":"") + R"rawliteral(>7</option>
   <option value="8")rawliteral" + String(numRelays==8?" selected":"") + R"rawliteral(>8</option>
 </select>
-<div class="relay-container">
+<br>
 )rawliteral";
 
+    // Tombol relay dinamis
     for(int i=0;i<numRelays;i++){
-        html += "<div class='relay'><p>Relay "+String(i+1)+"</p>";
-        html += "<button id='btn"+String(i)+"' class='" + (relayState[i]?"on":"off") + "' onclick='toggleRelay("+String(i)+")'>";
-        html += relayState[i]?"ON":"OFF";
-        html += "</button></div>";
+        html += "<button id='btn"+String(i)+"' class='"+(relayState[i]?"on":"off")+"' onclick='toggleRelay("+String(i)+")'>Relay "+String(i+1)+"</button>";
     }
 
     html += R"rawliteral(
-</div>
-<button id="runningBtn" onclick="toggleRunning()">RUNNING RELAY</button>
+<br>
+<button id="runningBtn" onclick="toggleRunning()">RUNNING</button>
 <button id="blitzBtn" onclick="toggleBlitz()">BLITZ PESAWAT</button>
 <footer>87PROJECT</footer>
 <script>
 function toggleRelay(index){
-    fetch('/toggle?index='+index)
-    .then(resp=>resp.json())
-    .then(data=>{
-        let btn=document.getElementById('btn'+index);
-        btn.innerText=data.state?'ON':'OFF';
-        btn.className=data.state?'on':'off';
-    });
+  fetch('/toggle?index='+index)
+  .then(resp=>resp.json())
+  .then(data=>{
+    let btn=document.getElementById('btn'+index);
+    btn.className=data.state?'on':'off';
+  });
 }
 
 function toggleRunning(){
-    fetch('/running')
-    .then(resp=>resp.json())
-    .then(data=>{
-        document.getElementById('runningBtn').innerText = data.running?'STOP RUNNING':'RUNNING RELAY';
-        // matikan blitz jika running aktif
-        if(data.running) document.getElementById('blitzBtn').innerText='BLITZ PESAWAT';
-    });
+  fetch('/running')
+  .then(resp=>resp.json())
+  .then(data=>{
+    document.getElementById('runningBtn').innerText = data.running?'STOP RUNNING':'RUNNING';
+    if(data.running) document.getElementById('blitzBtn').innerText='BLITZ PESAWAT';
+  });
 }
 
 function toggleBlitz(){
-    fetch('/blitz')
-    .then(resp=>resp.json())
-    .then(data=>{
-        document.getElementById('blitzBtn').innerText = data.blitz ? 'STOP BLITZ' : 'BLITZ PESAWAT';
-        // matikan running jika blitz aktif
-        if(data.blitz) document.getElementById('runningBtn').innerText='RUNNING RELAY';
-    });
+  fetch('/blitz')
+  .then(resp=>resp.json())
+  .then(data=>{
+    document.getElementById('blitzBtn').innerText = data.blitz?'STOP BLITZ':'BLITZ PESAWAT';
+    if(data.blitz) document.getElementById('runningBtn').innerText='RUNNING';
+  });
 }
 
 function changeRelayNum(){
-    let val=document.getElementById('relayNum').value;
-    fetch('/setRelayNum?num='+val)
-    .then(()=>location.reload());
+  let val=document.getElementById('relayNum').value;
+  fetch('/setRelayNum?num='+val).then(()=>location.reload());
 }
 
 setInterval(()=>{
-    fetch('/status')
-    .then(resp=>resp.json())
-    .then(data=>{
-        for(let i=0;i<data.states.length;i++){
-            let btn=document.getElementById('btn'+i);
-            btn.innerText=data.states[i]?'ON':'OFF';
-            btn.className=data.states[i]?'on':'off';
-        }
-    });
+  fetch('/status')
+  .then(resp=>resp.json())
+  .then(data=>{
+    for(let i=0;i<data.states.length;i++){
+      let btn=document.getElementById('btn'+i);
+      btn.className=data.states[i]?'on':'off';
+    }
+  });
 },500);
 </script>
 </body>
@@ -117,7 +106,7 @@ setInterval(()=>{
     return html;
 }
 
-// Handler
+// ===== Handlers =====
 void handleRoot(){ server.send(200,"text/html",generateHTML()); }
 
 void handleToggle(){
@@ -126,7 +115,7 @@ void handleToggle(){
         if(idx>=0 && idx<numRelays){
             relayState[idx]=!relayState[idx];
             digitalWrite(allPins[idx],relayState[idx]?LOW:HIGH);
-            server.send(200,"application/json","{\"state\":" + String(relayState[idx]?"true":"false")+"}");
+            server.send(200,"application/json","{\"state\":"+String(relayState[idx]?"true":"false")+"}");
             return;
         }
     }
@@ -145,13 +134,13 @@ void handleStatus(){
 
 void handleRunning(){
     runningRelay=!runningRelay;
-    if(runningRelay) blitzMode=false; // matikan blitz kalau running aktif
+    if(runningRelay) blitzMode=false;
     server.send(200,"application/json","{\"running\":"+String(runningRelay?"true":"false")+"}");
 }
 
 void handleBlitz(){
     blitzMode=!blitzMode;
-    if(blitzMode) runningRelay=false; // matikan running kalau blitz aktif
+    if(blitzMode) runningRelay=false;
     server.send(200,"application/json","{\"blitz\":"+String(blitzMode?"true":"false")+"}");
 }
 
@@ -163,6 +152,7 @@ void handleSetRelayNum(){
     server.send(200,"text/plain","OK");
 }
 
+// ===== Setup =====
 void setup(){
     Serial.begin(115200);
     for(int i=0;i<8;i++){ pinMode(allPins[i],OUTPUT); digitalWrite(allPins[i],HIGH); }
@@ -185,15 +175,15 @@ void setup(){
     randomSeed(analogRead(A0));
 }
 
+// ===== Loop =====
 void loop(){
     server.handleClient();
 
-    // ===== RUNNING relay (pola tetap + acak) =====
+    // ===== RUNNING =====
     if(runningRelay){
         // pola tetap
         int fixedPatterns[][8] = {{0,1,2,3,4,5,6,7},{7,6,5,4,3,2,1,0}};
-        int numFixed=2;
-        for(int p=0;p<numFixed;p++){
+        for(int p=0;p<2;p++){
             if(!runningRelay) break;
             for(int i=0;i<numRelays;i++){
                 int r = fixedPatterns[p][i];
@@ -246,7 +236,7 @@ void loop(){
         for(int i=0;i<numRelays;i++){
             int r=idx[i];
             digitalWrite(allPins[r],LOW); relayState[r]=true;
-            delay(50); // sangat cepat
+            delay(50);
             digitalWrite(allPins[r],HIGH); relayState[r]=false;
         }
     }
