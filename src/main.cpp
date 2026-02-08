@@ -4,14 +4,15 @@
 const char* ssid = "87PROJECT-MATRIXV2";
 const char* password = "87PROJECT.AI";
 
-// Semua pin relay yang tersedia (maks 8)
+// Semua pin relay (maks 8)
 const int allPins[8] = {D1,D2,D5,D6,D7,D8,D3,D4};
-int numRelays = 4; // default 4 relay aktif
+int numRelays = 4;
 bool relayState[8] = {false,false,false,false,false,false,false,false};
 
 ESP8266WebServer server(80);
 bool runningRelay = false;
 bool blitzMode = false;
+bool allOnMode = false;
 
 // ===== Generate halaman web =====
 String generateHTML() {
@@ -28,6 +29,7 @@ button{padding:15px 30px;margin:10px;border-radius:10px;border:none;cursor:point
 .off{background:#222;color:#00ffdd;}
 #runningBtn{background:#ff00ff;color:#111;margin:10px;}
 #blitzBtn{background:#ff0000;color:#fff;margin:10px;}
+#allOnBtn{background:#00aa00;color:#fff;margin:10px;}
 select{padding:8px;border-radius:8px;margin:20px;background:#111;color:#00ffdd;border:none;}
 footer{margin-top:20px;text-shadow:0 0 10px #00ffdd;}
 </style>
@@ -45,7 +47,6 @@ footer{margin-top:20px;text-shadow:0 0 10px #00ffdd;}
 <br>
 )rawliteral";
 
-    // Tombol relay dinamis
     for(int i=0;i<numRelays;i++){
         html += "<button id='btn"+String(i)+"' class='"+(relayState[i]?"on":"off")+"' onclick='toggleRelay("+String(i)+")'>Relay "+String(i+1)+"</button>";
     }
@@ -54,6 +55,7 @@ footer{margin-top:20px;text-shadow:0 0 10px #00ffdd;}
 <br>
 <button id="runningBtn" onclick="toggleRunning()">RUNNING</button>
 <button id="blitzBtn" onclick="toggleBlitz()">BLITZ PESAWAT</button>
+<button id="allOnBtn" onclick="toggleAllOn()">ALL ON</button>
 <footer>87PROJECT</footer>
 <script>
 function toggleRelay(index){
@@ -80,6 +82,14 @@ function toggleBlitz(){
   .then(data=>{
     document.getElementById('blitzBtn').innerText = data.blitz?'STOP BLITZ':'BLITZ PESAWAT';
     if(data.blitz) document.getElementById('runningBtn').innerText='RUNNING';
+  });
+}
+
+function toggleAllOn(){
+  fetch('/allon')
+  .then(resp=>resp.json())
+  .then(data=>{
+    document.getElementById('allOnBtn').innerText = data.allOn?'ALL OFF':'ALL ON';
   });
 }
 
@@ -134,14 +144,24 @@ void handleStatus(){
 
 void handleRunning(){
     runningRelay=!runningRelay;
-    if(runningRelay) blitzMode=false;
+    if(runningRelay) { blitzMode=false; allOnMode=false; }
     server.send(200,"application/json","{\"running\":"+String(runningRelay?"true":"false")+"}");
 }
 
 void handleBlitz(){
     blitzMode=!blitzMode;
-    if(blitzMode) runningRelay=false;
+    if(blitzMode) { runningRelay=false; allOnMode=false; }
     server.send(200,"application/json","{\"blitz\":"+String(blitzMode?"true":"false")+"}");
+}
+
+void handleAllOn(){
+    allOnMode=!allOnMode;
+    if(allOnMode) { runningRelay=false; blitzMode=false; }
+    for(int i=0;i<numRelays;i++){
+        digitalWrite(allPins[i],allOnMode?LOW:HIGH);
+        relayState[i]=allOnMode;
+    }
+    server.send(200,"application/json","{\"allOn\":"+String(allOnMode?"true":"false")+"}");
 }
 
 void handleSetRelayNum(){
@@ -170,6 +190,7 @@ void setup(){
     server.on("/status",handleStatus);
     server.on("/running",handleRunning);
     server.on("/blitz",handleBlitz);
+    server.on("/allon",handleAllOn);
     server.on("/setRelayNum",handleSetRelayNum);
     server.begin();
     randomSeed(analogRead(A0));
@@ -179,65 +200,39 @@ void setup(){
 void loop(){
     server.handleClient();
 
-    // ===== RUNNING =====
+    // ===== RUNNING acak modern =====
     if(runningRelay){
-        // pola tetap
-        int fixedPatterns[][8] = {{0,1,2,3,4,5,6,7},{7,6,5,4,3,2,1,0}};
-        for(int p=0;p<2;p++){
-            if(!runningRelay) break;
-            for(int i=0;i<numRelays;i++){
-                int r = fixedPatterns[p][i];
-                digitalWrite(allPins[r],LOW); relayState[r]=true;
-                delay(100);
-                digitalWrite(allPins[r],HIGH); relayState[r]=false;
-            }
-        }
-
-        // beberapa pola acak predefined
-        int randomPatterns[][8] = {
-            {1,2,0,3,4,5,6,7},
-            {2,3,0,1,4,5,6,7},
-            {3,2,1,0,4,5,6,7},
-            {0,3,1,2,4,5,6,7}
-        };
-        int sel = random(0,4);
-        for(int i=0;i<numRelays;i++){
-            int r = randomPatterns[sel][i];
-            digitalWrite(allPins[r],LOW); relayState[r]=true;
-            delay(90);
-            digitalWrite(allPins[r],HIGH); relayState[r]=false;
-        }
-
-        // pola acak tambahan
         int idx[8]; for(int i=0;i<numRelays;i++) idx[i]=i;
-        int count=random(1,numRelays+1);
         for(int i=0;i<numRelays;i++){
             int r=i+random(numRelays-i);
             int t=idx[i]; idx[i]=idx[r]; idx[r]=t;
         }
-        for(int i=0;i<count;i++){
+        int activeCount=random(1,numRelays+1);
+        for(int i=0;i<activeCount;i++){
             int r=idx[i];
             digitalWrite(allPins[r],LOW); relayState[r]=true;
         }
-        delay(120);
-        for(int i=0;i<count;i++){
+        delay(90);
+        for(int i=0;i<activeCount;i++){
             int r=idx[i];
             digitalWrite(allPins[r],HIGH); relayState[r]=false;
         }
     }
 
-    // ===== BLITZ PESAWAT =====
+    // ===== BLITZ PESAWAT flash =====
     if(blitzMode){
-        int idx[8]; for(int i=0;i<numRelays;i++) idx[i]=i;
         for(int i=0;i<numRelays;i++){
-            int r=i+random(numRelays-i);
-            int t=idx[i]; idx[i]=idx[r]; idx[r]=t;
-        }
-        for(int i=0;i<numRelays;i++){
-            int r=idx[i];
-            digitalWrite(allPins[r],LOW); relayState[r]=true;
+            digitalWrite(allPins[i],LOW); relayState[i]=true;
             delay(50);
-            digitalWrite(allPins[r],HIGH); relayState[r]=false;
+            digitalWrite(allPins[i],HIGH); relayState[i]=false;
+            delay(50);
+        }
+    }
+
+    // ===== ALL ON =====
+    if(allOnMode){
+        for(int i=0;i<numRelays;i++){
+            digitalWrite(allPins[i],LOW); relayState[i]=true;
         }
     }
 }
