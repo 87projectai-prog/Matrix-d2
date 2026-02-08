@@ -1,15 +1,18 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
-const char* ssid = "87PROJECT-MATRIX";
+const char* ssid = "87PROJECT-RELAY";
 const char* password = "87PROJECT.AI";
 
-const int relayPins[4] = {D1, D2, D5, D6};
-bool relayState[4] = {false, false, false, false};
+// Semua pin relay yang tersedia
+const int allPins[8] = {D1,D2,D5,D6,D7,D8,D3,D4};
+int numRelays = 4; // default 4 relay aktif
+bool relayState[8] = {false,false,false,false,false,false,false,false};
 
 ESP8266WebServer server(80);
 bool runningRelay = false;
 
+// Generate halaman web
 String generateHTML() {
     String html = R"rawliteral(
 <!DOCTYPE html>
@@ -26,19 +29,28 @@ h1 { margin:20px; text-shadow:0 0 20px #00ffdd; }
 .relay:hover { transform:scale(1.05); }
 .relay button { padding:12px 28px; font-size:16px; border:none; border-radius:12px; cursor:pointer; transition:0.3s; color:#111; font-weight:bold; margin-top:10px; }
 .on { background:#00ffdd; } .off { background:#222; color:#00ffdd; }
-#runningBtn { background:#ff00ff; color:#111; }
+#runningBtn { background:#ff00ff; color:#111; margin-bottom:20px;}
 footer { margin-top:auto; padding:10px; text-shadow:0 0 10px #00ffdd; }
+select { padding:8px; border-radius:8px; margin-bottom:20px; background:#111; color:#00ffdd; border:none;}
 </style>
 </head>
 <body>
 <h1>87PROJECT Relay Control</h1>
+<label>Jumlah Relay:</label>
+<select id="relayNum" onchange="changeRelayNum()">
+  <option value="4")rawliteral" + String(numRelays==4?" selected":"") + R"rawliteral(>4</option>
+  <option value="5")rawliteral" + String(numRelays==5?" selected":"") + R"rawliteral(>5</option>
+  <option value="6")rawliteral" + String(numRelays==6?" selected":"") + R"rawliteral(>6</option>
+  <option value="7")rawliteral" + String(numRelays==7?" selected":"") + R"rawliteral(>7</option>
+  <option value="8")rawliteral" + String(numRelays==8?" selected":"") + R"rawliteral(>8</option>
+</select>
 <div class="relay-container">
 )rawliteral";
 
-    for (int i = 0; i < 4; i++) {
-        html += "<div class='relay'><p>Relay " + String(i + 1) + "</p>";
-        html += "<button id='btn" + String(i) + "' class='" + (relayState[i] ? "on" : "off") + "' onclick='toggleRelay(" + String(i) + ")'>";
-        html += relayState[i] ? "ON" : "OFF";
+    for(int i=0;i<numRelays;i++){
+        html += "<div class='relay'><p>Relay "+String(i+1)+"</p>";
+        html += "<button id='btn"+String(i)+"' class='" + (relayState[i]?"on":"off") + "' onclick='toggleRelay("+String(i)+")'>";
+        html += relayState[i]?"ON":"OFF";
         html += "</button></div>";
     }
 
@@ -49,7 +61,7 @@ footer { margin-top:auto; padding:10px; text-shadow:0 0 10px #00ffdd; }
 <script>
 function toggleRelay(index){
     fetch('/toggle?index='+index)
-    .then(response=>response.json())
+    .then(resp=>resp.json())
     .then(data=>{
         let btn=document.getElementById('btn'+index);
         btn.innerText=data.state?'ON':'OFF';
@@ -59,18 +71,23 @@ function toggleRelay(index){
 
 function toggleRunning(){
     fetch('/running')
-    .then(response=>response.json())
+    .then(resp=>resp.json())
     .then(data=>{
-        let btn=document.getElementById('runningBtn');
-        btn.innerText = data.running ? 'STOP RUNNING' : 'RUNNING RELAY';
+        document.getElementById('runningBtn').innerText = data.running?'STOP RUNNING':'RUNNING RELAY';
     });
+}
+
+function changeRelayNum(){
+    let val=document.getElementById('relayNum').value;
+    fetch('/setRelayNum?num='+val)
+    .then(()=>location.reload());
 }
 
 setInterval(()=>{
     fetch('/status')
-    .then(response=>response.json())
+    .then(resp=>resp.json())
     .then(data=>{
-        for(let i=0;i<4;i++){
+        for(let i=0;i<data.states.length;i++){
             let btn=document.getElementById('btn'+i);
             btn.innerText=data.states[i]?'ON':'OFF';
             btn.className=data.states[i]?'on':'off';
@@ -85,77 +102,90 @@ setInterval(()=>{
     return html;
 }
 
-void handleRoot() { server.send(200, "text/html", generateHTML()); }
+// Handler
+void handleRoot(){ server.send(200,"text/html",generateHTML()); }
 
-void handleToggle() {
-    if (server.hasArg("index")) {
-        int idx = server.arg("index").toInt();
-        if (idx >= 0 && idx < 4) {
-            relayState[idx] = !relayState[idx];
-            digitalWrite(relayPins[idx], relayState[idx] ? LOW : HIGH);
-            server.send(200, "application/json", "{\"state\":" + String(relayState[idx] ? "true" : "false") + "}");
+void handleToggle(){
+    if(server.hasArg("index")){
+        int idx=server.arg("index").toInt();
+        if(idx>=0 && idx<numRelays){
+            relayState[idx]=!relayState[idx];
+            digitalWrite(allPins[idx],relayState[idx]?LOW:HIGH);
+            server.send(200,"application/json","{\"state\":" + String(relayState[idx]?"true":"false")+"}");
             return;
         }
     }
-    server.send(400, "text/plain", "Invalid index");
+    server.send(400,"text/plain","Invalid index");
 }
 
-void handleStatus() {
-    String json = "{\"states\":[";
-    for (int i = 0; i < 4; i++) {
-        json += relayState[i] ? "true" : "false";
-        if (i < 3) json += ",";
+void handleStatus(){
+    String json="{\"states\":[";
+    for(int i=0;i<numRelays;i++){
+        json += relayState[i]?"true":"false";
+        if(i<numRelays-1) json+=",";
     }
     json += "]}";
-    server.send(200, "application/json", json);
+    server.send(200,"application/json",json);
 }
 
-void handleRunning() {
-    runningRelay = !runningRelay;
-    server.send(200, "application/json", "{\"running\":" + String(runningRelay ? "true" : "false") + "}");
+void handleRunning(){
+    runningRelay=!runningRelay;
+    server.send(200,"application/json","{\"running\":"+String(runningRelay?"true":"false")+"}");
 }
 
-void setup() {
+void handleSetRelayNum(){
+    if(server.hasArg("num")){
+        int n=server.arg("num").toInt();
+        if(n>=4 && n<=8) numRelays=n;
+    }
+    server.send(200,"text/plain","OK");
+}
+
+void setup(){
     Serial.begin(115200);
-    for (int i = 0; i < 4; i++) { pinMode(relayPins[i], OUTPUT); digitalWrite(relayPins[i], HIGH); }
+    for(int i=0;i<8;i++){ pinMode(allPins[i],OUTPUT); digitalWrite(allPins[i],HIGH); }
 
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    unsigned long startTime = millis();
-    while (WiFi.status() != WL_CONNECTED) {
+    WiFi.begin(ssid,password);
+    unsigned long start=millis();
+    while(WiFi.status()!=WL_CONNECTED){
         delay(500); Serial.print(".");
-        if (millis() - startTime > 15000) {
-            WiFi.mode(WIFI_AP_STA);
-            WiFi.softAP(ssid, password);
-            break;
-        }
+        if(millis()-start>15000){ WiFi.mode(WIFI_AP_STA); WiFi.softAP(ssid,password); break;}
     }
 
-    server.on("/", handleRoot);
-    server.on("/toggle", handleToggle);
-    server.on("/status", handleStatus);
-    server.on("/running", handleRunning);
+    server.on("/",handleRoot);
+    server.on("/toggle",handleToggle);
+    server.on("/status",handleStatus);
+    server.on("/running",handleRunning);
+    server.on("/setRelayNum",handleSetRelayNum);
     server.begin();
     randomSeed(analogRead(A0));
 }
 
-void loop() {
+void loop(){
     server.handleClient();
 
-    if (runningRelay) {
-        int idx[4] = {0,1,2,3};
-        int count = random(1,5); // nyala 1-4 relay acak
-        // acak urutan
-        for(int i=0;i<4;i++){
-            int r=i+random(4-i); int t=idx[i]; idx[i]=idx[r]; idx[r]=t;
+    if(runningRelay){
+        // Efek 8TR kiri→kanan
+        for(int i=0;i<numRelays;i++){
+            if(!runningRelay) break;
+            digitalWrite(allPins[i],LOW); relayState[i]=true;
+            delay(100);
+            digitalWrite(allPins[i],HIGH); relayState[i]=false;
         }
-
-        // nyalakan relay acak bergantian
-        for(int i=0;i<count;i++){
-            int r=idx[i];
-            digitalWrite(relayPins[r], LOW); relayState[r]=true;
-            delay(120); // animasi cepat
-            digitalWrite(relayPins[r], HIGH); relayState[r]=false;
+        // Efek 8TR kanan→kiri
+        for(int i=numRelays-1;i>=0;i--){
+            if(!runningRelay) break;
+            digitalWrite(allPins[i],LOW); relayState[i]=true;
+            delay(100);
+            digitalWrite(allPins[i],HIGH); relayState[i]=false;
         }
+        // Efek acak 1–numRelays relay
+        int idx[8]; for(int i=0;i<numRelays;i++) idx[i]=i;
+        int count=random(1,numRelays+1);
+        for(int i=0;i<numRelays;i++){ int r=i+random(numRelays-i); int t=idx[i]; idx[i]=idx[r]; idx[r]=t; }
+        for(int i=0;i<count;i++){ int r=idx[i]; digitalWrite(allPins[r],LOW); relayState[r]=true; }
+        delay(120);
+        for(int i=0;i<count;i++){ int r=idx[i]; digitalWrite(allPins[r],HIGH); relayState[r]=false; }
     }
 }
