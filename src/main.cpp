@@ -1,7 +1,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
-const char* ssid = "87PROJECT-RELAY";
+const char* ssid = "87PROJECT-MATRIXV2";
 const char* password = "87PROJECT.AI";
 
 // Semua pin relay yang tersedia
@@ -11,6 +11,7 @@ bool relayState[8] = {false,false,false,false,false,false,false,false};
 
 ESP8266WebServer server(80);
 bool runningRelay = false;
+bool blitzMode = false;
 
 // Generate halaman web
 String generateHTML() {
@@ -29,7 +30,8 @@ h1 { margin:20px; text-shadow:0 0 20px #00ffdd; }
 .relay:hover { transform:scale(1.05); }
 .relay button { padding:12px 28px; font-size:16px; border:none; border-radius:12px; cursor:pointer; transition:0.3s; color:#111; font-weight:bold; margin-top:10px; }
 .on { background:#00ffdd; } .off { background:#222; color:#00ffdd; }
-#runningBtn { background:#ff00ff; color:#111; margin-bottom:20px;}
+#runningBtn { background:#ff00ff; color:#111; margin-bottom:10px;}
+#blitzBtn { background:#ff0000; color:#fff; margin-bottom:20px;}
 footer { margin-top:auto; padding:10px; text-shadow:0 0 10px #00ffdd; }
 select { padding:8px; border-radius:8px; margin-bottom:20px; background:#111; color:#00ffdd; border:none;}
 </style>
@@ -57,6 +59,7 @@ select { padding:8px; border-radius:8px; margin-bottom:20px; background:#111; co
     html += R"rawliteral(
 </div>
 <button id="runningBtn" onclick="toggleRunning()">RUNNING RELAY</button>
+<button id="blitzBtn" onclick="toggleBlitz()">BLITZ PESAWAT</button>
 <footer>87PROJECT</footer>
 <script>
 function toggleRelay(index){
@@ -74,6 +77,18 @@ function toggleRunning(){
     .then(resp=>resp.json())
     .then(data=>{
         document.getElementById('runningBtn').innerText = data.running?'STOP RUNNING':'RUNNING RELAY';
+        // matikan blitz jika running aktif
+        if(data.running) document.getElementById('blitzBtn').innerText='BLITZ PESAWAT';
+    });
+}
+
+function toggleBlitz(){
+    fetch('/blitz')
+    .then(resp=>resp.json())
+    .then(data=>{
+        document.getElementById('blitzBtn').innerText = data.blitz ? 'STOP BLITZ' : 'BLITZ PESAWAT';
+        // matikan running jika blitz aktif
+        if(data.blitz) document.getElementById('runningBtn').innerText='RUNNING RELAY';
     });
 }
 
@@ -130,7 +145,14 @@ void handleStatus(){
 
 void handleRunning(){
     runningRelay=!runningRelay;
+    if(runningRelay) blitzMode=false; // matikan blitz kalau running aktif
     server.send(200,"application/json","{\"running\":"+String(runningRelay?"true":"false")+"}");
+}
+
+void handleBlitz(){
+    blitzMode=!blitzMode;
+    if(blitzMode) runningRelay=false; // matikan running kalau blitz aktif
+    server.send(200,"application/json","{\"blitz\":"+String(blitzMode?"true":"false")+"}");
 }
 
 void handleSetRelayNum(){
@@ -157,6 +179,7 @@ void setup(){
     server.on("/toggle",handleToggle);
     server.on("/status",handleStatus);
     server.on("/running",handleRunning);
+    server.on("/blitz",handleBlitz);
     server.on("/setRelayNum",handleSetRelayNum);
     server.begin();
     randomSeed(analogRead(A0));
@@ -165,27 +188,66 @@ void setup(){
 void loop(){
     server.handleClient();
 
+    // ===== RUNNING relay (pola tetap + acak) =====
     if(runningRelay){
-        // Efek 8TR kiri→kanan
+        // pola tetap
+        int fixedPatterns[][8] = {{0,1,2,3,4,5,6,7},{7,6,5,4,3,2,1,0}};
+        int numFixed=2;
+        for(int p=0;p<numFixed;p++){
+            if(!runningRelay) break;
+            for(int i=0;i<numRelays;i++){
+                int r = fixedPatterns[p][i];
+                digitalWrite(allPins[r],LOW); relayState[r]=true;
+                delay(100);
+                digitalWrite(allPins[r],HIGH); relayState[r]=false;
+            }
+        }
+
+        // beberapa pola acak predefined
+        int randomPatterns[][8] = {
+            {1,2,0,3,4,5,6,7},
+            {2,3,0,1,4,5,6,7},
+            {3,2,1,0,4,5,6,7},
+            {0,3,1,2,4,5,6,7}
+        };
+        int sel = random(0,4);
         for(int i=0;i<numRelays;i++){
-            if(!runningRelay) break;
-            digitalWrite(allPins[i],LOW); relayState[i]=true;
-            delay(100);
-            digitalWrite(allPins[i],HIGH); relayState[i]=false;
+            int r = randomPatterns[sel][i];
+            digitalWrite(allPins[r],LOW); relayState[r]=true;
+            delay(90);
+            digitalWrite(allPins[r],HIGH); relayState[r]=false;
         }
-        // Efek 8TR kanan→kiri
-        for(int i=numRelays-1;i>=0;i--){
-            if(!runningRelay) break;
-            digitalWrite(allPins[i],LOW); relayState[i]=true;
-            delay(100);
-            digitalWrite(allPins[i],HIGH); relayState[i]=false;
-        }
-        // Efek acak 1–numRelays relay
+
+        // pola acak tambahan
         int idx[8]; for(int i=0;i<numRelays;i++) idx[i]=i;
         int count=random(1,numRelays+1);
-        for(int i=0;i<numRelays;i++){ int r=i+random(numRelays-i); int t=idx[i]; idx[i]=idx[r]; idx[r]=t; }
-        for(int i=0;i<count;i++){ int r=idx[i]; digitalWrite(allPins[r],LOW); relayState[r]=true; }
+        for(int i=0;i<numRelays;i++){
+            int r=i+random(numRelays-i);
+            int t=idx[i]; idx[i]=idx[r]; idx[r]=t;
+        }
+        for(int i=0;i<count;i++){
+            int r=idx[i];
+            digitalWrite(allPins[r],LOW); relayState[r]=true;
+        }
         delay(120);
-        for(int i=0;i<count;i++){ int r=idx[i]; digitalWrite(allPins[r],HIGH); relayState[r]=false; }
+        for(int i=0;i<count;i++){
+            int r=idx[i];
+            digitalWrite(allPins[r],HIGH); relayState[r]=false;
+        }
+    }
+
+    // ===== BLITZ PESAWAT =====
+    if(blitzMode){
+        int idx[8]; for(int i=0;i<numRelays;i++) idx[i]=i;
+        for(int i=0;i<numRelays;i++){
+            int r=i+random(numRelays-i);
+            int t=idx[i]; idx[i]=idx[r]; idx[r]=t;
+        }
+        for(int i=0;i<numRelays;i++){
+            int r=idx[i];
+            digitalWrite(allPins[r],LOW); relayState[r]=true;
+            delay(50); // sangat cepat
+            digitalWrite(allPins[r],HIGH); relayState[r]=false;
+        }
     }
 }
