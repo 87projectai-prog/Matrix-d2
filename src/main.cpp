@@ -5,7 +5,7 @@
 ESP8266WebServer server(80);
 
 /* ================= CONFIG ================= */
-const char* apSSID = "87PROJECT-RELAY";
+const char* apSSID = "87PROJECT-MATRIXV2";
 const char* apPASS = "87PROJECT.AI";
 
 /* Relay ACTIVE LOW */
