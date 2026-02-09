@@ -1,10 +1,12 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <EEPROM.h>
 
 ESP8266WebServer server(80);
 
 /* ================= CONFIG ================= */
 #define MAX_RELAY 8
+#define EEPROM_SIZE 16
 
 // PIN ORDER: D1 D2 D5 D6 D7 D8 RX TX
 int relayPins[MAX_RELAY] = {5,4,14,12,13,15,3,1};
@@ -14,7 +16,7 @@ const char* pass = "87PROJECT.AI";
 
 /* ================= STATUS ================= */
 bool relayState[MAX_RELAY];
-int relayCount = 4;
+int relayCount = 4;   // default
 
 bool runningMode = false;
 bool blitzMode   = false;
@@ -49,114 +51,24 @@ void allOn(){
   }
 }
 
-/* ============ RUNNING MODES (0–9) ============ */
-void modeRandomSingle(){
-  allOff();
-  digitalWrite(relayPins[random(relayCount)], LOW);
-}
+/* ============ RUNNING MODES ============ */
+void modeRandomSingle(){ allOff(); digitalWrite(relayPins[random(relayCount)], LOW); }
+void modeRandomDouble(){ allOff(); digitalWrite(relayPins[random(relayCount)], LOW); digitalWrite(relayPins[random(relayCount)], LOW); }
+void modePingPong(){ static int i=0,d=1; allOff(); digitalWrite(relayPins[i],LOW); i+=d; if(i<=0||i>=relayCount-1) d=-d; }
+void modeSnake(){ static int i=0; allOff(); digitalWrite(relayPins[i],LOW); if(i+1<relayCount) digitalWrite(relayPins[i+1],LOW); i=(i+1)%relayCount; }
+void modeOddEven(){ static bool s=false; allOff(); for(int i=0;i<relayCount;i++) if(i%2==s) digitalWrite(relayPins[i],LOW); s=!s; }
+void modeMirror(){ static int i=0; allOff(); digitalWrite(relayPins[i],LOW); digitalWrite(relayPins[relayCount-1-i],LOW); i=(i+1)%(relayCount/2+1); }
+void modeCenterOut(){ static int i=0; int c=relayCount/2; allOff(); if(c-i>=0) digitalWrite(relayPins[c-i],LOW); if(c+i<relayCount) digitalWrite(relayPins[c+i],LOW); i++; if(i>c) i=0; }
+void modeEdgeIn(){ static int i=0; allOff(); digitalWrite(relayPins[i],LOW); digitalWrite(relayPins[relayCount-1-i],LOW); i++; if(i>relayCount/2) i=0; }
+void modeWave(){ static int s=0; allOff(); for(int i=0;i<relayCount;i++) if((i+s)%3==0) digitalWrite(relayPins[i],LOW); s++; }
+void modeChaos(){ allOff(); for(int i=0;i<relayCount;i++) if(random(100)<40) digitalWrite(relayPins[i],LOW); }
 
-void modeRandomDouble(){
-  allOff();
-  digitalWrite(relayPins[random(relayCount)], LOW);
-  digitalWrite(relayPins[random(relayCount)], LOW);
-}
-
-void modePingPong(){
-  static int i=0,d=1;
-  allOff();
-  digitalWrite(relayPins[i],LOW);
-  i+=d;
-  if(i<=0||i>=relayCount-1) d=-d;
-}
-
-void modeSnake(){
-  static int i=0;
-  allOff();
-  digitalWrite(relayPins[i],LOW);
-  if(i+1<relayCount) digitalWrite(relayPins[i+1],LOW);
-  i=(i+1)%relayCount;
-}
-
-void modeOddEven(){
-  static bool s=false;
-  allOff();
-  for(int i=0;i<relayCount;i++)
-    if(i%2==s) digitalWrite(relayPins[i],LOW);
-  s=!s;
-}
-
-void modeMirror(){
-  static int i=0;
-  allOff();
-  digitalWrite(relayPins[i],LOW);
-  digitalWrite(relayPins[relayCount-1-i],LOW);
-  i=(i+1)%(relayCount/2+1);
-}
-
-void modeCenterOut(){
-  static int i=0;
-  int c=relayCount/2;
-  allOff();
-  if(c-i>=0) digitalWrite(relayPins[c-i],LOW);
-  if(c+i<relayCount) digitalWrite(relayPins[c+i],LOW);
-  i++; if(i>c) i=0;
-}
-
-void modeEdgeIn(){
-  static int i=0;
-  allOff();
-  digitalWrite(relayPins[i],LOW);
-  digitalWrite(relayPins[relayCount-1-i],LOW);
-  i++; if(i>relayCount/2) i=0;
-}
-
-void modeWave(){
-  static int s=0;
-  allOff();
-  for(int i=0;i<relayCount;i++)
-    if((i+s)%3==0) digitalWrite(relayPins[i],LOW);
-  s++;
-}
-
-void modeChaos(){
-  allOff();
-  for(int i=0;i<relayCount;i++)
-    if(random(100)<40) digitalWrite(relayPins[i],LOW);
-}
-
-/* ============ VARIANT MODES (10–49) ============ */
-void modeBurst(int density){
-  allOff();
-  for(int i=0;i<relayCount;i++)
-    if(random(100)<density) digitalWrite(relayPins[i],LOW);
-}
-
-void modeGroup(int size){
-  static int p=0;
-  allOff();
-  for(int i=0;i<size;i++)
-    digitalWrite(relayPins[(p+i)%relayCount],LOW);
-  p=(p+1)%relayCount;
-}
-
-void modeMirrorChaos(){
-  allOff();
-  int i=random(relayCount/2);
-  digitalWrite(relayPins[i],LOW);
-  digitalWrite(relayPins[relayCount-1-i],LOW);
-}
-
-void modeWavePhase(int phase){
-  allOff();
-  for(int i=0;i<relayCount;i++)
-    if((i+phase)%4==0) digitalWrite(relayPins[i],LOW);
-}
-
-void modeFlashStep(){
-  static bool s=false;
-  s=!s;
-  s?allOn():allOff();
-}
+/* VARIANT MODES (10–49) */
+void modeBurst(int density){ allOff(); for(int i=0;i<relayCount;i++) if(random(100)<density) digitalWrite(relayPins[i],LOW); }
+void modeGroup(int size){ static int p=0; allOff(); for(int i=0;i<size;i++) digitalWrite(relayPins[(p+i)%relayCount],LOW); p=(p+1)%relayCount; }
+void modeMirrorChaos(){ allOff(); int i=random(relayCount/2); digitalWrite(relayPins[i],LOW); digitalWrite(relayPins[relayCount-1-i],LOW); }
+void modeWavePhase(int phase){ allOff(); for(int i=0;i<relayCount;i++) if((i+phase)%4==0) digitalWrite(relayPins[i],LOW); }
+void modeFlashStep(){ static bool s=false; s=!s; s?allOn():allOff(); }
 
 /* ============ RUN ENGINE ============ */
 void runEngine(){
@@ -174,7 +86,6 @@ void runEngine(){
     case 7: modeEdgeIn(); break;
     case 8: modeWave(); break;
     case 9: modeChaos(); break;
-
     case 10 ... 19: modeBurst(20+(runMode-10)*5); break;
     case 20 ... 29: modeGroup(1+(runMode-20)%3); break;
     case 30 ... 34: modeMirrorChaos(); break;
@@ -189,10 +100,9 @@ void runEngine(){
   }
 }
 
-/* ============ BLITZ ENGINE (AIRCRAFT) ============ */
+/* ============ BLITZ ENGINE ============ */
 void handleBlitzFlash(){
   if(!blitzMode) return;
-
   unsigned long now=millis();
 
   if(!blitzState && now-blitzTimer>=blitzOffTime){
@@ -206,7 +116,6 @@ void handleBlitzFlash(){
     allOff();
     blitzState=false;
     blitzTimer=now;
-
     if(doubleFlash){
       delay(60);
       allOn();
@@ -214,6 +123,22 @@ void handleBlitzFlash(){
       allOff();
     }
   }
+}
+
+/* ============ EEPROM SAVE / LOAD ============ */
+void saveSettings(){
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.write(0, relayCount);
+  EEPROM.put(1, runningSpeed);
+  EEPROM.write(3, runMode);
+  EEPROM.commit();
+}
+
+void loadSettings(){
+  EEPROM.begin(EEPROM_SIZE);
+  relayCount=constrain(EEPROM.read(0),2,8);
+  EEPROM.get(1,runningSpeed);
+  runMode=EEPROM.read(3);
 }
 
 /* ============ WEB UI ============ */
@@ -239,7 +164,7 @@ String page(){
   h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
 
   h+="<br><button onclick=\"fetch('/blitz')\">BLITZ PESAWAT</button>";
-  h+="<footer><br>Created by 87PROJECT</footer></body></html>";
+  h+="<footer><br>Created By 87PROJECT</footer></body></html>";
   return h;
 }
 
@@ -248,18 +173,20 @@ void setup(){
   Serial.begin(115200);
   WiFi.softAP(ssid,pass);
 
+  loadSettings(); // load setelan terakhir
+
   for(int i=0;i<MAX_RELAY;i++){
     pinMode(relayPins[i],OUTPUT);
     digitalWrite(relayPins[i],HIGH);
   }
 
-  server.on("/",[]{server.send(200,"text/html",page());});
-  server.on("/relay",[]{int i=server.arg("id").toInt(); if(i<relayCount){relayState[i]=!relayState[i]; digitalWrite(relayPins[i],relayState[i]?LOW:HIGH);} server.send(200,"text/plain","OK");});
-  server.on("/all",[]{server.arg("x")=="1"?allOn():allOff(); server.send(200,"text/plain","OK");});
-  server.on("/run",[]{runningMode=!runningMode; blitzMode=false; allOff(); server.send(200,"text/plain","OK");});
-  server.on("/blitz",[]{blitzMode=!blitzMode; runningMode=false; allOff(); server.send(200,"text/plain","OK");});
-  server.on("/speed",[]{runningSpeed=server.arg("v").toInt(); server.send(200,"text/plain","OK");});
-  server.on("/set",[]{relayCount=constrain(server.arg("ch").toInt(),2,8); allOff(); server.send(200,"text/plain","OK");});
+  server.on("/",[]{ server.send(200,"text/html",page()); });
+  server.on("/relay",[]{ int i=server.arg("id").toInt(); if(i<relayCount){ relayState[i]=!relayState[i]; digitalWrite(relayPins[i],relayState[i]?LOW:HIGH); } server.send(200,"text/plain","OK"); });
+  server.on("/all",[]{ server.arg("x")=="1"?allOn():allOff(); server.send(200,"text/plain","OK"); });
+  server.on("/run",[]{ runningMode=!runningMode; blitzMode=false; allOff(); server.send(200,"text/plain","OK"); });
+  server.on("/blitz",[]{ blitzMode=!blitzMode; runningMode=false; allOff(); server.send(200,"text/plain","OK"); });
+  server.on("/speed",[]{ runningSpeed=server.arg("v").toInt(); saveSettings(); server.send(200,"text/plain","OK"); });
+  server.on("/set",[]{ relayCount=constrain(server.arg("ch").toInt(),2,8); allOff(); saveSettings(); server.send(200,"text/plain","OK"); });
 
   server.begin();
 }
