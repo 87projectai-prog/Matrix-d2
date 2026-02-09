@@ -6,7 +6,7 @@ ESP8266WebServer server(80);
 
 /* ================= CONFIG ================= */
 #define MAX_RELAY 8
-#define EEPROM_SIZE 16
+#define EEPROM_SIZE 32  // lebih besar karena kita simpan semua state
 
 // PIN ORDER: D1 D2 D5 D6 D7 D8 RX TX
 int relayPins[MAX_RELAY] = {5,4,14,12,13,15,3,1};
@@ -131,6 +131,10 @@ void saveSettings(){
   EEPROM.write(0, relayCount);
   EEPROM.put(1, runningSpeed);
   EEPROM.write(3, runMode);
+  EEPROM.write(4, runningMode?1:0);
+  EEPROM.write(5, blitzMode?1:0);
+  // save relay states
+  for(int i=0;i<relayCount;i++) EEPROM.write(6+i, relayState[i]?1:0);
   EEPROM.commit();
 }
 
@@ -139,6 +143,12 @@ void loadSettings(){
   relayCount=constrain(EEPROM.read(0),2,8);
   EEPROM.get(1,runningSpeed);
   runMode=EEPROM.read(3);
+  runningMode = EEPROM.read(4)==1;
+  blitzMode = EEPROM.read(5)==1;
+  for(int i=0;i<relayCount;i++){
+    relayState[i] = EEPROM.read(6+i)==1;
+    digitalWrite(relayPins[i], relayState[i]?LOW:HIGH);
+  }
 }
 
 /* ============ WEB UI ============ */
@@ -160,10 +170,11 @@ String page(){
   h+="<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
   h+="<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
 
-  h+="<br><button onclick=\"fetch('/run')\">MATRIX</button>";
+  h+="<br><button onclick=\"fetch('/run')\">Matrix</button>";
   h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
 
-  h+="<br><button onclick=\"fetch('/blitz')\">BLITZ PESAWAT</button>";
+  h+="<br><button onclick=\"fetch('/blitz')\">Blizt Pesawat</button>";
+  h+="<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
   h+="<footer><br>Created By 87PROJECT</footer></body></html>";
   return h;
 }
@@ -173,20 +184,21 @@ void setup(){
   Serial.begin(115200);
   WiFi.softAP(ssid,pass);
 
-  loadSettings(); // load setelan terakhir
-
   for(int i=0;i<MAX_RELAY;i++){
     pinMode(relayPins[i],OUTPUT);
     digitalWrite(relayPins[i],HIGH);
   }
+
+  loadSettings(); // load last saved
 
   server.on("/",[]{ server.send(200,"text/html",page()); });
   server.on("/relay",[]{ int i=server.arg("id").toInt(); if(i<relayCount){ relayState[i]=!relayState[i]; digitalWrite(relayPins[i],relayState[i]?LOW:HIGH); } server.send(200,"text/plain","OK"); });
   server.on("/all",[]{ server.arg("x")=="1"?allOn():allOff(); server.send(200,"text/plain","OK"); });
   server.on("/run",[]{ runningMode=!runningMode; blitzMode=false; allOff(); server.send(200,"text/plain","OK"); });
   server.on("/blitz",[]{ blitzMode=!blitzMode; runningMode=false; allOff(); server.send(200,"text/plain","OK"); });
-  server.on("/speed",[]{ runningSpeed=server.arg("v").toInt(); saveSettings(); server.send(200,"text/plain","OK"); });
-  server.on("/set",[]{ relayCount=constrain(server.arg("ch").toInt(),2,8); allOff(); saveSettings(); server.send(200,"text/plain","OK"); });
+  server.on("/speed",[]{ runningSpeed=server.arg("v").toInt(); server.send(200,"text/plain","OK"); });
+  server.on("/set",[]{ relayCount=constrain(server.arg("ch").toInt(),2,8); allOff(); server.send(200,"text/plain","OK"); });
+  server.on("/save",[]{ saveSettings(); server.send(200,"text/plain","Settings Saved!"); });
 
   server.begin();
 }
