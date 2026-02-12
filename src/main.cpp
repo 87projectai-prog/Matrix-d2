@@ -25,13 +25,12 @@ bool blitzMode   = false;
 unsigned long runningSpeed = 120;
 unsigned long lastRun = 0;
 
-/* ================= BLITZ ================= */
-int blitzGroupSize = 2;      // jumlah relay per grup (1-4)
-unsigned long blitzOnTime   = 200;  // durasi grup nyala
-unsigned long blitzOffTime  = 800;  // durasi grup mati
-bool blitzDoubleFlash        = true; // double flash per grup
-unsigned long blitzTimer = 0;
+/* BLITZ (AIRCRAFT / CAMERA) */
+unsigned long blitzOnTime  = 80;
+unsigned long blitzOffTime = 2000;
+unsigned long blitzTimer   = 0;
 bool blitzState = false;
+bool doubleFlash = false;
 
 /* ================= RUNNING ================= */
 #define TOTAL_MODE 50
@@ -101,38 +100,41 @@ void runEngine(){
   }
 }
 
-/* ============ BLITZ FINAL ================= */
-void handleBlitzFlash() {
+/* ============ BLITZ ENGINE (FLASH CAMERA) ============ */
+void handleBlitzFlash(){
   if(!blitzMode) return;
+  unsigned long now=millis();
 
-  static int groupIndex = 0;       // grup relay yang sedang nyala
-  unsigned long now = millis();
-
-  if(now - blitzTimer >= blitzOffTime + blitzOnTime) {
-    blitzTimer = now;
-
-    allOff();  // matikan semua relay
-
-    // nyalakan grup saat ini
-    int start = groupIndex * blitzGroupSize;
-    int end = start + blitzGroupSize;
-    for(int i=start; i<end && i<relayCount; i++){
-      digitalWrite(relayPins[i], LOW);
+  if(!blitzState && now-blitzTimer>=blitzOffTime){
+    blitzTimer=now;
+    blitzState=true;
+    // Nyalakan jalur 1-2 atau 3-4 secara bergantian, nyala 20%
+    for(int i=0;i<relayCount;i++){
+      if(i<2) digitalWrite(relayPins[i], LOW);
+      else digitalWrite(relayPins[i], HIGH);
     }
+    doubleFlash = random(100)<20;
+  }
 
-    // double flash opsional
-    if(blitzDoubleFlash && random(100)<30){
-      delay(50); allOff(); delay(50);
-      for(int i=start; i<end && i<relayCount; i++) digitalWrite(relayPins[i], LOW);
-      delay(50); allOff();
+  if(blitzState && now-blitzTimer>=blitzOnTime){
+    // Matikan jalur sebelumnya
+    for(int i=0;i<relayCount;i++){
+      if(i<2) digitalWrite(relayPins[i], HIGH);
+      else digitalWrite(relayPins[i], LOW);
     }
+    blitzState=false;
+    blitzTimer=now;
 
-    // pindah ke grup berikutnya
-    groupIndex = (groupIndex + 1) % ((relayCount + blitzGroupSize - 1)/blitzGroupSize);
+    if(doubleFlash){
+      delay(60);
+      allOn();
+      delay(70);
+      allOff();
+    }
   }
 }
 
-/* ============ EEPROM ================= */
+/* ============ EEPROM SAVE / LOAD ============ */
 void saveSettings(){
   EEPROM.begin(EEPROM_SIZE);
   EEPROM.write(0, relayCount);
@@ -153,12 +155,11 @@ void loadSettings(){
   blitzMode = EEPROM.read(5)==1;
   for(int i=0;i<relayCount;i++){
     relayState[i] = EEPROM.read(6+i)==1;
-    pinMode(relayPins[i],OUTPUT);
     digitalWrite(relayPins[i], relayState[i]?LOW:HIGH);
   }
 }
 
-/* ============ WEB UI ================= */
+/* ============ WEB UI ============ */
 String page(){
   String h="<html><head><meta name=viewport content='width=device-width,initial-scale=1'>";
   h+="<style>body{background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}";
@@ -166,13 +167,19 @@ String page(){
   h+="select,input{width:90%;padding:10px;margin:10px}</style></head><body>";
   h+="<h2>87PROJECT MATRIXV2</h2>";
 
+  // Dropdown jumlah relay
   h+="<select onchange=\"fetch('/set?ch='+this.value)\">";
   for(int i=2;i<=8;i++)
     h+="<option "+String(i==relayCount?"selected":"")+">"+String(i)+"</option>";
   h+="</select>";
 
-  for(int i=0;i<relayCount;i++)
-    h+="<button onclick=\"fetch('/relay?id="+String(i)+"')\">Relay "+String(i+1)+"</button>";
+  // Tombol relay 1-8 selalu tampil
+  for(int i=0;i<MAX_RELAY;i++){
+    if(i<relayCount)
+      h+="<button onclick=\"fetch('/relay?id="+String(i)+"')\">Relay "+String(i+1)+"</button>";
+    else
+      h+="<button disabled style='opacity:0.3'>Relay "+String(i+1)+"</button>";
+  }
 
   h+="<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
   h+="<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
@@ -180,24 +187,14 @@ String page(){
   h+="<br><button onclick=\"fetch('/run')\">RUNNING</button>";
   h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
 
-  h+="<br><h3>BLITZ SETTINGS</h3>";
-  h+="<label>Group Size:</label><select onchange=\"fetch('/blitz_group?size='+this.value)\">";
-  for(int i=1;i<=4;i++)
-    h+="<option "+String(i==blitzGroupSize?"selected":"")+">"+String(i)+"</option>";
-  h+="</select>";
-
-  h+="<label>ON Time (ms):</label><input type=number value="+String(blitzOnTime)+" onchange=\"fetch('/blitz_on?v='+this.value)\">";
-  h+="<label>OFF Time (ms):</label><input type=number value="+String(blitzOffTime)+" onchange=\"fetch('/blitz_off?v='+this.value)\">";
-
-  h+="<br><button onclick=\"fetch('/blitz_toggle')\">TOGGLE BLITZ</button>";
-  h+="<label>Double Flash:</label><input type=checkbox "+(blitzDoubleFlash?"checked":"")+" onchange=\"fetch('/blitz_double?val='+this.checked)\">";
-
+  h+="<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
   h+="<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
-  h+="<footer><br>Created By 87PROJECT</footer></body></html>";
+
+  h+="<footer><br>Created by 87PROJECT</footer></body></html>";
   return h;
 }
 
-/* ============ SETUP ================= */
+/* ============ SETUP ============ */
 void setup(){
   Serial.begin(115200);
   WiFi.softAP(ssid,pass);
@@ -207,29 +204,21 @@ void setup(){
     digitalWrite(relayPins[i],HIGH);
   }
 
-  loadSettings();
+  loadSettings(); // load last saved
 
-  // WEB HANDLER
   server.on("/",[]{ server.send(200,"text/html",page()); });
   server.on("/relay",[]{ int i=server.arg("id").toInt(); if(i<relayCount){ relayState[i]=!relayState[i]; digitalWrite(relayPins[i],relayState[i]?LOW:HIGH); } server.send(200,"text/plain","OK"); });
   server.on("/all",[]{ server.arg("x")=="1"?allOn():allOff(); server.send(200,"text/plain","OK"); });
   server.on("/run",[]{ runningMode=!runningMode; blitzMode=false; allOff(); server.send(200,"text/plain","OK"); });
+  server.on("/blitz",[]{ blitzMode=!blitzMode; runningMode=false; allOff(); server.send(200,"text/plain","OK"); });
   server.on("/speed",[]{ runningSpeed=server.arg("v").toInt(); server.send(200,"text/plain","OK"); });
-
-  // BLITZ WEB
-  server.on("/blitz_toggle",[]{ blitzMode=!blitzMode; runningMode=false; allOff(); server.send(200,"text/plain","OK"); });
-  server.on("/blitz_group",[]{ blitzGroupSize=constrain(server.arg("size").toInt(),1,4); server.send(200,"text/plain","OK"); });
-  server.on("/blitz_on",[]{ blitzOnTime=server.arg("v").toInt(); server.send(200,"text/plain","OK"); });
-  server.on("/blitz_off",[]{ blitzOffTime=server.arg("v").toInt(); server.send(200,"text/plain","OK"); });
-  server.on("/blitz_double",[]{ blitzDoubleFlash=(server.arg("val")=="true"); server.send(200,"text/plain","OK"); });
-
   server.on("/set",[]{ relayCount=constrain(server.arg("ch").toInt(),2,8); allOff(); server.send(200,"text/plain","OK"); });
   server.on("/save",[]{ saveSettings(); server.send(200,"text/plain","Settings Saved!"); });
 
   server.begin();
 }
 
-/* ============ LOOP ================= */
+/* ============ LOOP ============ */
 void loop(){
   server.handleClient();
   if(runningMode) runEngine();
