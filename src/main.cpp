@@ -164,7 +164,7 @@ String page(){
   h+="<style>body{background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}";
   h+="button{width:45%;padding:15px;margin:5px;font-size:18px;border-radius:12px}";
   h+="select,input{width:90%;padding:10px;margin:10px}</style></head><body>";
-  h+="<h2>87PROJECT RELAY</h2>";
+  h+="<h2>87PROJECT MATRIXV2</h2>";
 
   h+="<select onchange=\"fetch('/set?ch='+this.value)\">";
   for(int i=2;i<=8;i++)
