@@ -6,48 +6,46 @@ ESP8266WebServer server(80);
 
 /* ================= CONFIG ================= */
 #define MAX_RELAY 8
-#define EEPROM_SIZE 32  // lebih besar karena kita simpan semua state
+#define EEPROM_SIZE 32  // simpan semua state
 
-// PIN ORDER: D1 D2 D5 D6 D7 D8 RX TX
-int relayPins[MAX_RELAY] = {5,4,14,12,13,15,3,1};
-
+int relayPins[MAX_RELAY] = {5,4,14,12,13,15,3,1}; // D1 D2 D5 D6 D7 D8 RX TX
 const char* ssid = "87PROJECT-MATRIXV2";
 const char* pass = "87PROJECT.AI";
 
 /* ================= STATUS ================= */
 bool relayState[MAX_RELAY];
-int relayCount = 4;   // default
-
+int relayCount = 4; // default
 bool runningMode = false;
-bool blitzMode   = false;
+bool blitzMode = false;
 
 /* ================= TIMING ================= */
 unsigned long runningSpeed = 120;
 unsigned long lastRun = 0;
 
-/* BLITZ (AIRCRAFT / CAMERA) */
-unsigned long blitzOnTime  = 80;
+/* ================= BLITZ ================= */
+unsigned long blitzOnTime = 80;
 unsigned long blitzOffTime = 2000;
-unsigned long blitzTimer   = 0;
+unsigned long blitzTimer = 0;
 bool blitzState = false;
 bool doubleFlash = false;
+bool toggleGroup = false; // jalur 1-2 atau 3-4
 
 /* ================= RUNNING ================= */
 #define TOTAL_MODE 50
 int runMode = 0;
 
 /* ================= BASIC ================= */
-void allOff(){
+void allOff() {
   for(int i=0;i<relayCount;i++){
     digitalWrite(relayPins[i], HIGH);
-    relayState[i]=false;
+    relayState[i] = false;
   }
 }
 
-void allOn(){
+void allOn() {
   for(int i=0;i<relayCount;i++){
     digitalWrite(relayPins[i], LOW);
-    relayState[i]=true;
+    relayState[i] = true;
   }
 }
 
@@ -100,36 +98,33 @@ void runEngine(){
   }
 }
 
-/* ============ BLITZ ENGINE (FLASH CAMERA) ============ */
+/* ============ BLITZ ENGINE REALISTIC ============ */
 void handleBlitzFlash(){
   if(!blitzMode) return;
-  unsigned long now=millis();
+  unsigned long now = millis();
 
-  if(!blitzState && now-blitzTimer>=blitzOffTime){
-    blitzTimer=now;
-    blitzState=true;
-    // Nyalakan jalur 1-2 atau 3-4 secara bergantian, nyala 20%
-    for(int i=0;i<relayCount;i++){
-      if(i<2) digitalWrite(relayPins[i], LOW);
-      else digitalWrite(relayPins[i], HIGH);
-    }
-    doubleFlash = random(100)<20;
-  }
+  if(now - blitzTimer >= (blitzState ? blitzOnTime : blitzOffTime)){
+    blitzTimer = now;
+    blitzState = !blitzState;
 
-  if(blitzState && now-blitzTimer>=blitzOnTime){
-    // Matikan jalur sebelumnya
-    for(int i=0;i<relayCount;i++){
-      if(i<2) digitalWrite(relayPins[i], HIGH);
-      else digitalWrite(relayPins[i], LOW);
-    }
-    blitzState=false;
-    blitzTimer=now;
-
-    if(doubleFlash){
-      delay(60);
-      allOn();
-      delay(70);
+    if(blitzState){
+      for(int i=0;i<relayCount;i++){
+        if(toggleGroup){
+          if(i<2) digitalWrite(relayPins[i], LOW); else digitalWrite(relayPins[i], HIGH);
+        } else {
+          if(i>=2 && i<4) digitalWrite(relayPins[i], LOW); else digitalWrite(relayPins[i], HIGH);
+        }
+      }
+      doubleFlash = random(100) < 20; // 20% double flash
+    } else {
       allOff();
+      if(doubleFlash){
+        delay(60);
+        allOn();
+        delay(70);
+        allOff();
+      }
+      toggleGroup = !toggleGroup; // ganti jalur
     }
   }
 }
@@ -161,36 +156,28 @@ void loadSettings(){
 
 /* ============ WEB UI ============ */
 String page(){
-  String h="<html><head><meta name=viewport content='width=device-width,initial-scale=1'>";
-  h+="<style>body{background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}";
-  h+="button{width:45%;padding:15px;margin:5px;font-size:18px;border-radius:12px}";
-  h+="select,input{width:90%;padding:10px;margin:10px}</style></head><body>";
-  h+="<h2>87PROJECT MATRIXV2</h2>";
+  String h = "<html><head><meta name=viewport content='width=device-width,initial-scale=1'>";
+  h += "<style>body{background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}";
+  h += "button{width:45%;padding:15px;margin:5px;font-size:18px;border-radius:12px}";
+  h += "select,input{width:90%;padding:10px;margin:10px}</style></head><body>";
+  h += "<h2>87PROJECT MATRIXV2</h2>";
 
-  // Dropdown jumlah relay
-  h+="<select onchange=\"fetch('/set?ch='+this.value)\">";
-  for(int i=2;i<=8;i++)
-    h+="<option "+String(i==relayCount?"selected":"")+">"+String(i)+"</option>";
-  h+="</select>";
+  h += "<select onchange=\"fetch('/set?ch='+this.value)\">";
+  for(int i=2;i<=8;i++) h+="<option "+String(i==relayCount?"selected":"")+">"+String(i)+"</option>";
+  h += "</select>";
 
-  // Tombol relay 1-8 selalu tampil
-  for(int i=0;i<MAX_RELAY;i++){
-    if(i<relayCount)
-      h+="<button onclick=\"fetch('/relay?id="+String(i)+"')\">Relay "+String(i+1)+"</button>";
-    else
-      h+="<button disabled style='opacity:0.3'>Relay "+String(i+1)+"</button>";
-  }
+  for(int i=0;i<relayCount;i++)
+    h += "<button onclick=\"fetch('/relay?id="+String(i)+"')\">Relay "+String(i+1)+"</button>";
 
-  h+="<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
-  h+="<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
+  h += "<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
+  h += "<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
 
-  h+="<br><button onclick=\"fetch('/run')\">RUNNING</button>";
-  h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
+  h += "<br><button onclick=\"fetch('/run')\">RUNNING</button>";
+  h += "<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
 
-  h+="<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
-  h+="<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
-
-  h+="<footer><br>Created by 87PROJECT</footer></body></html>";
+  h += "<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
+  h += "<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
+  h += "<footer><br>Created by 87PROJECT</footer></body></html>";
   return h;
 }
 
@@ -204,7 +191,7 @@ void setup(){
     digitalWrite(relayPins[i],HIGH);
   }
 
-  loadSettings(); // load last saved
+  loadSettings();
 
   server.on("/",[]{ server.send(200,"text/html",page()); });
   server.on("/relay",[]{ int i=server.arg("id").toInt(); if(i<relayCount){ relayState[i]=!relayState[i]; digitalWrite(relayPins[i],relayState[i]?LOW:HIGH); } server.send(200,"text/plain","OK"); });
