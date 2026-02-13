@@ -4,50 +4,30 @@
 
 ESP8266WebServer server(80);
 
-/* ================= CONFIG ================= */
 #define MAX_RELAY 8
-#define EEPROM_SIZE 32  // simpan semua state
+#define EEPROM_SIZE 64
 
-int relayPins[MAX_RELAY] = {5,4,14,12,13,15,3,1}; // D1 D2 D5 D6 D7 D8 RX TX
+int relayPins[MAX_RELAY] = {5,4,14,12,13,15,3,1};
 const char* ssid = "87PROJECT-MATRIXV2";
 const char* pass = "87PROJECT.AI";
 
-/* ================= STATUS ================= */
 bool relayState[MAX_RELAY];
-int relayCount = 4; // default
+int relayCount = 4;
 bool runningMode = false;
 bool blitzMode = false;
-
-/* ================= TIMING ================= */
 unsigned long runningSpeed = 120;
 unsigned long lastRun = 0;
-
-/* ================= BLITZ ================= */
 unsigned long blitzOnTime = 80;
 unsigned long blitzOffTime = 2000;
 unsigned long blitzTimer = 0;
 bool blitzState = false;
-bool doubleFlash = false;
-bool toggleGroup = false; // jalur 1-2 atau 3-4
 
-/* ================= RUNNING ================= */
-#define TOTAL_MODE 50
+#define TOTAL_MODE 51
 int runMode = 0;
 
-/* ================= BASIC ================= */
-void allOff() {
-  for(int i=0;i<relayCount;i++){
-    digitalWrite(relayPins[i], HIGH);
-    relayState[i] = false;
-  }
-}
-
-void allOn() {
-  for(int i=0;i<relayCount;i++){
-    digitalWrite(relayPins[i], LOW);
-    relayState[i] = true;
-  }
-}
+/* ============ BASIC ============ */
+void allOff(){ for(int i=0;i<relayCount;i++){ digitalWrite(relayPins[i], HIGH); relayState[i]=false; } }
+void allOn() { for(int i=0;i<relayCount;i++){ digitalWrite(relayPins[i], LOW); relayState[i]=true; } }
 
 /* ============ RUNNING MODES ============ */
 void modeRandomSingle(){ allOff(); digitalWrite(relayPins[random(relayCount)], LOW); }
@@ -60,19 +40,17 @@ void modeCenterOut(){ static int i=0; int c=relayCount/2; allOff(); if(c-i>=0) d
 void modeEdgeIn(){ static int i=0; allOff(); digitalWrite(relayPins[i],LOW); digitalWrite(relayPins[relayCount-1-i],LOW); i++; if(i>relayCount/2) i=0; }
 void modeWave(){ static int s=0; allOff(); for(int i=0;i<relayCount;i++) if((i+s)%3==0) digitalWrite(relayPins[i],LOW); s++; }
 void modeChaos(){ allOff(); for(int i=0;i<relayCount;i++) if(random(100)<40) digitalWrite(relayPins[i],LOW); }
-
-/* VARIANT MODES (10–49) */
 void modeBurst(int density){ allOff(); for(int i=0;i<relayCount;i++) if(random(100)<density) digitalWrite(relayPins[i],LOW); }
 void modeGroup(int size){ static int p=0; allOff(); for(int i=0;i<size;i++) digitalWrite(relayPins[(p+i)%relayCount],LOW); p=(p+1)%relayCount; }
 void modeMirrorChaos(){ allOff(); int i=random(relayCount/2); digitalWrite(relayPins[i],LOW); digitalWrite(relayPins[relayCount-1-i],LOW); }
 void modeWavePhase(int phase){ allOff(); for(int i=0;i<relayCount;i++) if((i+phase)%4==0) digitalWrite(relayPins[i],LOW); }
 void modeFlashStep(){ static bool s=false; s=!s; s?allOn():allOff(); }
+void modePolice(){ static int idx=0; allOff(); digitalWrite(relayPins[idx%relayCount],LOW); digitalWrite(relayPins[(idx+1)%relayCount],LOW); idx=(idx+1)%relayCount; }
 
 /* ============ RUN ENGINE ============ */
 void runEngine(){
   if(millis()-lastRun<runningSpeed) return;
   lastRun=millis();
-
   switch(runMode){
     case 0: modeRandomSingle(); break;
     case 1: modeRandomDouble(); break;
@@ -88,52 +66,38 @@ void runEngine(){
     case 20 ... 29: modeGroup(1+(runMode-20)%3); break;
     case 30 ... 34: modeMirrorChaos(); break;
     case 35 ... 39: modeWavePhase(runMode-35); break;
-    default: modeFlashStep(); break;
+    case 40 ... 49: modeFlashStep(); break;
+    case 50: modePolice(); break;
   }
-
   static unsigned long modeTimer=0;
-  if(millis()-modeTimer>6000){
-    modeTimer=millis();
-    runMode=(runMode+1)%TOTAL_MODE;
-  }
+  if(millis()-modeTimer>6000){ modeTimer=millis(); runMode=(runMode+1)%TOTAL_MODE; }
 }
 
-/* ============ BLITZ ENGINE REALISTIC ============ */
+/* ============ BLITZ CAMERA ============ */
 void handleBlitzFlash(){
   if(!blitzMode) return;
-  unsigned long now = millis();
-
-  if(now - blitzTimer >= (blitzState ? blitzOnTime : blitzOffTime)){
-    blitzTimer = now;
-    blitzState = !blitzState;
-
-    if(blitzState){
-      for(int i=0;i<relayCount;i++){
-        if(toggleGroup){
-          if(i<2) digitalWrite(relayPins[i], LOW); else digitalWrite(relayPins[i], HIGH);
-        } else {
-          if(i>=2 && i<4) digitalWrite(relayPins[i], LOW); else digitalWrite(relayPins[i], HIGH);
-        }
+  unsigned long now=millis();
+  static bool flashState=false;
+  if(now-blitzTimer>= (flashState ? blitzOnTime : blitzOffTime)){
+    blitzTimer=now;
+    flashState=!flashState;
+    allOff();
+    if(flashState){
+      int grp = random(2);
+      bool on = random(100)<20;
+      if(on){
+        if(grp==0 && relayCount>=2){ digitalWrite(relayPins[0],LOW); digitalWrite(relayPins[1],LOW); }
+        if(grp==1 && relayCount>=4){ digitalWrite(relayPins[2],LOW); digitalWrite(relayPins[3],LOW); }
       }
-      doubleFlash = random(100) < 20; // 20% double flash
-    } else {
-      allOff();
-      if(doubleFlash){
-        delay(60);
-        allOn();
-        delay(70);
-        allOff();
-      }
-      toggleGroup = !toggleGroup; // ganti jalur
     }
   }
 }
 
-/* ============ EEPROM SAVE / LOAD ============ */
+/* ============ EEPROM ================= */
 void saveSettings(){
   EEPROM.begin(EEPROM_SIZE);
   EEPROM.write(0, relayCount);
-  EEPROM.put(1, runningSpeed);
+  EEPROM.put(1,runningSpeed);
   EEPROM.write(3, runMode);
   EEPROM.write(4, runningMode?1:0);
   EEPROM.write(5, blitzMode?1:0);
@@ -143,9 +107,9 @@ void saveSettings(){
 
 void loadSettings(){
   EEPROM.begin(EEPROM_SIZE);
-  relayCount=constrain(EEPROM.read(0),2,8);
+  relayCount = constrain(EEPROM.read(0),2,8);
   EEPROM.get(1,runningSpeed);
-  runMode=EEPROM.read(3);
+  runMode = EEPROM.read(3);
   runningMode = EEPROM.read(4)==1;
   blitzMode = EEPROM.read(5)==1;
   for(int i=0;i<relayCount;i++){
@@ -154,43 +118,38 @@ void loadSettings(){
   }
 }
 
-/* ============ WEB UI ============ */
+/* ============ WEB UI ================= */
 String page(){
-  String h = "<html><head><meta name=viewport content='width=device-width,initial-scale=1'>";
-  h += "<style>body{background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}";
-  h += "button{width:45%;padding:15px;margin:5px;font-size:18px;border-radius:12px}";
-  h += "select,input{width:90%;padding:10px;margin:10px}</style></head><body>";
-  h += "<h2>87PROJECT MATRIXV2</h2>";
-
-  h += "<select onchange=\"fetch('/set?ch='+this.value)\">";
+  String h="<html><head><meta name=viewport content='width=device-width,initial-scale=1'>";
+  h+="<style>body{background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}";
+  h+="button{width:40%;padding:15px;margin:5px;font-size:18px;border-radius:12px}";
+  h+="select,input{width:90%;padding:10px;margin:10px}";
+  h+=".on{background:green;color:#fff}.off{background:red;color:#fff}</style></head><body>";
+  h+="<h2>87PROJECT MATRIXV2</h2>";
+  
+  h+="<select onchange=\"fetch('/set?ch='+this.value)\">";
   for(int i=2;i<=8;i++) h+="<option "+String(i==relayCount?"selected":"")+">"+String(i)+"</option>";
-  h += "</select>";
+  h+="</select>";
 
-  for(int i=0;i<relayCount;i++)
-    h += "<button onclick=\"fetch('/relay?id="+String(i)+"')\">Relay "+String(i+1)+"</button>";
+  for(int i=0;i<relayCount;i++){
+    h+="<button class='"+String(relayState[i]?"on":"off")+"' onclick=\"fetch('/relay?id="+String(i)+"')\">Relay "+String(i+1)+"</button>";
+  }
 
-  h += "<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
-  h += "<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
-
-  h += "<br><button onclick=\"fetch('/run')\">MATRIX</button>";
-  h += "<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
-
-  h += "<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
-  h += "<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
-  h += "<footer><br>Created by 87PROJECT</footer></body></html>";
+  h+="<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
+  h+="<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
+  h+="<br><button onclick=\"fetch('/run')\">RUNNING</button>";
+  h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
+  h+="<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
+  h+="<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
+  h+="<footer><br>87PROJECT</footer></body></html>";
   return h;
 }
 
-/* ============ SETUP ============ */
+/* ============ SETUP ================= */
 void setup(){
   Serial.begin(115200);
-  WiFi.softAP(ssid,pass);
-
-  for(int i=0;i<MAX_RELAY;i++){
-    pinMode(relayPins[i],OUTPUT);
-    digitalWrite(relayPins[i],HIGH);
-  }
-
+  WiFi.softAP(ssid, pass);
+  for(int i=0;i<MAX_RELAY;i++){ pinMode(relayPins[i], OUTPUT); digitalWrite(relayPins[i], HIGH); }
   loadSettings();
 
   server.on("/",[]{ server.send(200,"text/html",page()); });
@@ -205,7 +164,7 @@ void setup(){
   server.begin();
 }
 
-/* ============ LOOP ============ */
+/* ============ LOOP ================= */
 void loop(){
   server.handleClient();
   if(runningMode) runEngine();
