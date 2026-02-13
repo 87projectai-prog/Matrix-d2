@@ -140,7 +140,7 @@ String page(){
   h+="<br><button onclick=\"fetch('/run')\">MATRIX</button>";
   h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
   h+="<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
-  h+="<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
+  h+="<br><button onclick=\"fetch('/save')\">SAVE</button>";
   h+="<footer><br>87PROJECT</footer></body></html>";
   return h;
 }
