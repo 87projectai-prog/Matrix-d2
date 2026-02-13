@@ -137,7 +137,7 @@ String page(){
 
   h+="<br><button onclick=\"fetch('/all?x=1')\">ALL ON</button>";
   h+="<button onclick=\"fetch('/all?x=0')\">ALL OFF</button>";
-  h+="<br><button onclick=\"fetch('/run')\">RUNNING</button>";
+  h+="<br><button onclick=\"fetch('/run')\">MATRIX</button>";
   h+="<input type=range min=40 max=500 value="+String(runningSpeed)+" oninput=\"fetch('/speed?v='+this.value)\">";
   h+="<br><button onclick=\"fetch('/blitz')\">BLITZ</button>";
   h+="<br><button onclick=\"fetch('/save')\">SAVE SETTINGS</button>";
